@@ -1,0 +1,974 @@
+{
+  "name": "ChunkLoopRAG",
+  "nodes": [
+    {
+      "parameters": {
+        "inputSource": "jsonExample",
+        "jsonExample": "{\n    \"fileName\": \"Testbericht_01.pdf\",\n    \"filePath\": \"/data/reports/Testbericht_01.pdf\",\n    \"num_chunks\": 1,\n    \"chunks\": [\n      {\n        \"chunk_index\": 0,\n        \"text\": \"text chunk\"\n      }\n    ]\n}\n"
+      },
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        864,
+        288
+      ],
+      "id": "f344d4cd-2191-4345-95d3-0c7887ba3c08",
+      "name": "When Executed by Another Workflow"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        1184,
+        288
+      ],
+      "id": "51c1ad29-3286-4ac6-820c-0b1dcfcd4a96",
+      "name": "for each chunk"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "qwen3-14b",
+          "mode": "list",
+          "cachedResultName": "qwen3-14b"
+        },
+        "responsesApiEnabled": false,
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        864,
+        704
+      ],
+      "id": "f1e3a69e-28bb-480e-a378-2a68421b0f0d",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "pYXv3PyMtEzhPSgj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const chunks = $json.chunks || [];\n\nreturn chunks.map(c => ({\n  json: {\n    fileName: $json.fileName,\n    filePath: $json.filePath,\n    chunk_index: c.chunk_index,\n    chunk_text: c.text\n  }\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1024,
+        288
+      ],
+      "id": "0d9dc82f-ad09-4c8c-84ed-c00cadd8082c",
+      "name": "split chunks"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Initiale Sammelstruktur\nlet result = {\n  \"Firma\": null,\n  \"Art des Jobs\": null,\n  \"Mitgebrachte Kenntnisse und Lehrveranstaltungen\": [],\n  \"Fehlende Kenntnisse und Lehrveranstaltungen\": []\n};\n\nfor (const item of items) {\n  const j = item.json;\n\n  // Firma: ersten nicht-null Wert nehmen\n  if (!result.Firma && j.Firma) {\n    result.Firma = j.Firma;\n  }\n\n  // Art des Jobs: ersten nicht-null Wert nehmen\n  if (!result[\"Art des Jobs\"] && j[\"Art des Jobs\"]) {\n    result[\"Art des Jobs\"] = j[\"Art des Jobs\"];\n  }\n\n  // Mitgebrachte Kenntnisse sammeln\n  if (Array.isArray(j[\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\"])) {\n    result[\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\"].push(\n      ...j[\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\"]\n    );\n  }\n\n  // Fehlende Kenntnisse sammeln\n  if (Array.isArray(j[\"Fehlende Kenntnisse und Lehrveranstaltungen\"])) {\n    result[\"Fehlende Kenntnisse und Lehrveranstaltungen\"].push(\n      ...j[\"Fehlende Kenntnisse und Lehrveranstaltungen\"]\n    );\n  }\n\n  // Abschnitt gefunden → OR-Verknüpfung\n  if (j.kenntnisse_abschnitt_gefunden === true) {\n    result.kenntnisse_abschnitt_gefunden = true;\n  }\n}\n\n// Duplikate entfernen\nresult[\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\"] = [\n  ...new Set(result[\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\"])\n];\n\nresult[\"Fehlende Kenntnisse und Lehrveranstaltungen\"] = [\n  ...new Set(result[\"Fehlende Kenntnisse und Lehrveranstaltungen\"])\n];\n\n// Leere Arrays optional auf null setzen (falls du das willst)\nif (result[\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\"].length === 0) {\n  result[\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\"] = null;\n}\n\nif (result[\"Fehlende Kenntnisse und Lehrveranstaltungen\"].length === 0) {\n  result[\"Fehlende Kenntnisse und Lehrveranstaltungen\"] = null;\n}\n\n// Als einzelnes Item zurückgeben\nreturn [\n  {\n    json: result\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1824,
+        -432
+      ],
+      "id": "7df655fb-65c8-48ac-b3e7-5a98dbe9e1e8",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=TEXT:\n{{$json.chunk_text}}\n\n/no_think",
+        "options": {
+          "systemMessage": "=Du bist ein JSON-Extraktor. Antworte AUSSCHLIESSLICH mit einem JSON-Objekt. Kein Text, kein Markdown, keine Backticks.\n\nAUFGABE:\nExtrahiere aus TEXT alle konkreten Kenntnisse, Fähigkeiten, Methoden oder Lehrveranstaltungen, die als BEREITS VORHANDENES WISSEN beschrieben werden – also Wissen, das VOR oder AUSSERHALB der beschriebenen Tätigkeit erworben wurde.\n\nEXTRAHIERE wenn der Text signalisiert, dass etwas:\n- aus dem Studium, einer Ausbildung oder Vorbildung stammt\n- als Vorbereitung, Grundlage oder Vorkenntnis diente\n- sich als hilfreich erwiesen hat (weil es bereits bekannt war)\n- vorher erlernt und dann angewandt wurde\n- eingebracht, mitgebracht oder bereits beherrscht wurde\n\nIGNORIERE:\n- Alles, was im Rahmen der beschriebenen Tätigkeit NEU erlernt, erklärt oder erstmals verwendet wurde\n- Tools, Software und Methoden, die lediglich als Arbeitsschritte beschrieben werden ohne Bezug zu Vorwissen\n- Ergebnisse, Produkte oder Artefakte der Tätigkeit\n\nPRIORITÄT:\nFazit-, Reflexions- und Zusammenfassungsabschnitte enthalten häufig Rückbezüge auf Vorwissen. Diese Abschnitte haben höchste Relevanz.\n\nBEISPIELE:\n\nINPUT: \"Die Vorlesung Statistik aus dem Studium erwies sich als hilfreich.\"\nOUTPUT: {\"extracted\":[\"Statistik\"],\"module_ids\":[]}\n\nINPUT: \"Meine Programmierkenntnisse aus der Ausbildung konnte ich direkt einbringen.\"\nOUTPUT: {\"extracted\":[\"Programmierkenntnisse\"],\"module_ids\":[]}\n\nINPUT: \"Die Daten wurden mithilfe von SQL abgefragt und in Excel exportiert.\"\nOUTPUT: {\"extracted\":[],\"module_ids\":[]}\n\nINPUT: \"Im Praktikum wurde ich in Power BI eingearbeitet.\"\nOUTPUT: {\"extracted\":[],\"module_ids\":[]}\n\nABSOLUTE REGELN:\n- Wenn nichts als Vorwissen erkennbar ist: extracted = [].\n- Keine Oberbegriffe erfinden, nur was wörtlich im Text steht.\n- \"Mitgebrachte Kenntnisse\" oder \"Lehrveranstaltungen\" NICHT als Einträge ausgeben.\n\nOUTPUT FORMAT: {\"extracted\":string[],\"module_ids\":string[]}\nmodule_ids immer []."
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1808,
+        240
+      ],
+      "id": "ee1616c6-7d72-4881-8d5b-c1ef4fc0c914",
+      "name": "AI Agent",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "let obj = $json;\nif (typeof $json.output === \"string\") {\n  try {\n    let clean = $json.output\n      .replace(/<think>[\\s\\S]*?<\\/think>/g, \"\")\n      .replace(/```json/g, \"\")\n      .replace(/```/g, \"\")\n      .trim();\n    obj = JSON.parse(clean);\n  } catch (e) {\n    return [{ json: { ...$json, rag_query: \"\" } }];\n  }\n}\nconst extracted = obj.extracted;\nlet rag_query = \"\";\nif (Array.isArray(extracted) && extracted.length > 0) {\n  rag_query = extracted\n    .map(s => (typeof s === \"string\" ? s.trim() : \"\"))\n    .filter(s => s.length > 0)\n    .join(\", \");\n}\nreturn [\n  {\n    json: {\n      ...obj,\n      rag_query,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        240
+      ],
+      "id": "c7b15642-9c93-429b-b0ec-13d487417c62",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.72.96.73:2543/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer lm-studio"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "text-embedding-nomic-embed-text-v1.5"
+            },
+            {
+              "name": "input",
+              "value": "={{ $('Code in JavaScript2').first().json.rag_query }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2672,
+        160
+      ],
+      "id": "1aad7c51-145c-41af-bbda-055abf8f3021",
+      "name": "HTTP Request",
+      "credentials": {
+        "openAiApi": {
+          "id": "pYXv3PyMtEzhPSgj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sqxpilwpfcgqmabogatq.supabase.co/rest/v1/rpc/match_modulev2",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query_embedding",
+              "value": "={{ $json.data[0].embedding }}"
+            },
+            {
+              "name": "match_count",
+              "value": "8"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2832,
+        160
+      ],
+      "id": "639f4286-4bb4-418e-ab23-a12ac537a1d7",
+      "name": "HTTP Request1",
+      "credentials": {
+        "supabaseApi": {
+          "id": "SstN4eyLeWb8YuEh",
+          "name": "WING_Module"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input: items from Supabase RPC (each item.json has: id, content, score)\n// Output: ONE item with a single text field `candidates_text` for the LLM\n\nconst items = $input.all();\n\nconst rows = items\n  .map(i => i.json)\n  .filter(r => r && r.id);\n\nconst seen = new Set();\nconst unique = [];\n\nfor (const r of rows) {\n  if (seen.has(r.id)) continue;\n  seen.add(r.id);\n  unique.push({\n    id: r.id,\n    score: typeof r.score === \"number\" ? r.score : null,\n    content: typeof r.content === \"string\" ? r.content : \"\",\n  });\n}\n\n// Build a compact text block for the LLM\nconst candidates_text = unique\n  .map((m, idx) => {\n    const scoreStr = m.score === null ? \"n/a\" : m.score.toFixed(4);\n    // keep content reasonably short (avoid token bloat)\n    const contentShort = m.content.replace(/\\s+/g, \" \").slice(0, 400);\n    return `#${idx + 1}\\nID: ${m.id}\\nScore: ${scoreStr}\\nContent: ${contentShort}`;\n  })\n  .join(\"\\n\\n---\\n\\n\");\n\nreturn [\n  {\n    json: {\n      candidates_text,\n      // optional: keep also structured data if you still want it\n      candidates_count: unique.length,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2992,
+        160
+      ],
+      "id": "35e74aca-2eb3-48d9-a8d8-ce54785a7900",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Du bist ein JSON-Extraktor. Antworte NUR mit einem JSON-Objekt.\nKein Text, kein Markdown, keine Backticks.\n\nAUFGABE:\nVergleiche die EXTRACTED-Liste mit den KANDIDATEN.\nWähle die Module, deren Inhalt am besten zu den extrahierten Begriffen passt.\nGib NUR die IDs der passenden Module zurück.\n\nREGELN:\n- Gib MAXIMAL so viele IDs zurück wie EXTRACTED Einträge hat.\n- Gib NUR IDs zurück (z.B. \"182316-Marketing\"), keine Modulnamen.\n- Wenn mehr Kandidaten als Einträge passen: wähle die mit dem höchsten Score.\n- Bevorzuge Module, die mehrere EXTRACTED-Begriffe abdecken.\n- Wenn EXTRACTED leer ist oder kein Kandidat passt → null.\n- Entscheide anhand des Inhalts (Content), nicht nur anhand des Scores.\n\nBEISPIELE:\n\nEXTRACTED: [\"Datenbanken\", \"SQL\"]\nKANDIDATEN: #1 ID: 123-Datenbanken Score: 0.85 Content: Modul: Datenbanken, Inhalte: SQL, relationale Datenbanken...\nOUTPUT: {\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\":[\"123-Datenbanken\"]}\n\nEXTRACTED: []\nOUTPUT: {\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\":null}\n\nEXTRACTED: [\"Kochen\", \"Backen\"]\nKANDIDATEN: #1 ID: 456-Marketing Score: 0.4 Content: Modul: Marketing, Inhalte: Marktanalyse...\nOUTPUT: {\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\":null}\n\n────────────────────────────────────\nEXTRACTED:\n{{ $('Code in JavaScript2').first().json.extracted }}\n────────────────────────────────────\nKANDIDATEN:\n{{ $json.candidates_text }}\n────────────────────────────────────\n\nOUTPUT: {\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\":string[]|null}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        3152,
+        160
+      ],
+      "id": "2ebf4b95-df22-4dc7-9d82-58f2db0dc821",
+      "name": "Basic LLM Chain2",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "numberInputs": 3
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        4048,
+        256
+      ],
+      "id": "581531d8-a0e2-4ea8-805a-6609aa8a5008",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.text;\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  throw new Error(\"Ungültiger JSON-String\");\n}\n\nreturn [\n  {\n    json: parsed\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3648,
+        -48
+      ],
+      "id": "352873a2-4703-4a0e-9734-2977991d259a",
+      "name": "Code in JavaScript4",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.text;\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  throw new Error(\"Ungültiger JSON-String\");\n}\n\nreturn [\n  {\n    json: parsed\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3648,
+        256
+      ],
+      "id": "3810b5ff-0773-4c1c-8266-c9fddeea3df1",
+      "name": "Code in JavaScript5",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const raw = $json.text;\n\nlet parsed;\ntry {\n  parsed = JSON.parse(raw);\n} catch (e) {\n  throw new Error(\"Ungültiger JSON-String\");\n}\n\nreturn [\n  {\n    json: parsed\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3648,
+        544
+      ],
+      "id": "280e98c3-b1d2-45f9-82ac-0315c157ec8a",
+      "name": "Code in JavaScript6",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst result = {\n  Firma: null,\n  \"Art des Jobs\": null,\n  \"Mitgebrachte Kenntnisse und Lehrveranstaltungen\": null,\n  \"Fehlende Kenntnisse und Lehrveranstaltungen\": null,\n};\n\nfor (const item of items) {\n  const json = item.json;\n\n  if (json.Firma !== undefined) {\n    result.Firma = json.Firma;\n  }\n\n  if (json[\"Art des Jobs\"] !== undefined) {\n    result[\"Art des Jobs\"] = json[\"Art des Jobs\"];\n  }\n\n  if (json[\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\"] !== undefined) {\n    result[\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\"] =\n      json[\"Mitgebrachte Kenntnisse und Lehrveranstaltungen\"];\n  }\n\n  if (json[\"Fehlende Kenntnisse und Lehrveranstaltungen\"] !== undefined) {\n    result[\"Fehlende Kenntnisse und Lehrveranstaltungen\"] =\n      json[\"Fehlende Kenntnisse und Lehrveranstaltungen\"];\n  }\n}\n\nfor (const key of Object.keys(result)) {\n  if (Array.isArray(result[key]) && result[key].length === 0) {\n    result[key] = null;\n  }\n}\n\nreturn [\n  {\n    json: result\n  }\n];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4272,
+        624
+      ],
+      "id": "0f103694-2245-4f9c-9926-2c2978c130db",
+      "name": "Code in JavaScript7"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $json.text ?? \"\";\nraw = raw.replace(/<think>[\\s\\S]*?<\\/think>/g, \"\")\n         .replace(/```json/g, \"\")\n         .replace(/```/g, \"\")\n         .trim();\nreturn [{ json: JSON.parse(raw) }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3440,
+        160
+      ],
+      "id": "d7df08ac-ecf6-4868-89e2-74a7af89dd2d",
+      "name": "Code in JavaScript8"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $json.output ?? \"\";\nraw = raw.replace(/<think>[\\s\\S]*?<\\/think>/g, \"\")\n         .replace(/```json/g, \"\")\n         .replace(/```/g, \"\")\n         .trim();\nreturn [{ json: JSON.parse(raw) }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        -64
+      ],
+      "id": "2ef950f6-4dc4-4300-9da8-f818b52df00d",
+      "name": "Code in JavaScript9"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $json.output ?? \"\";\nraw = raw.replace(/<think>[\\s\\S]*?<\\/think>/g, \"\")\n         .replace(/```json/g, \"\")\n         .replace(/```/g, \"\")\n         .trim();\nreturn [{ json: JSON.parse(raw) }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2112,
+        544
+      ],
+      "id": "721df9ba-8222-4ff7-955b-047c5d669bde",
+      "name": "Code in JavaScript10"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=TEXT:\n{{$json.chunk_text}}\n\n/no_think",
+        "options": {
+          "systemMessage": "=Du bist ein JSON-Extraktor. Antworte NUR mit einem JSON-Objekt.\nKein Text, kein Markdown, keine Backticks.\nVerwende NUR Informationen aus dem TEXT. Wenn nichts gefunden → null.\n\nAUFGABE: Extrahiere den Firmennamen der praktischen Tätigkeit.\n\nNORMALISIERUNG (nur für Firma):\nEntferne Rechtsformen und Zusätze am Anfang/Ende:\nGmbH, AG, SE, KG, Inc., Ltd., LLC, Group, Holding,\nCorporation, Deutschland, Europe, EMEA\nKeine Wörter aus der Mitte entfernen. Keine Wörter ergänzen.\nWenn kein sinnvoller Kern bleibt → null.\nWenn mehrere Firmen und unklar wo die Tätigkeit stattfand → null.\n\nBEISPIELE:\n\nINPUT: \"Das Praktikum bei der Bosch GmbH in Stuttgart...\"\nOUTPUT: {\"Firma\":\"Bosch\"}\n\nINPUT: \"Mein Praxissemester bei Mercedes-Benz Group AG, Werk Sindelfingen...\"\nOUTPUT: {\"Firma\":\"Mercedes-Benz\"}\n\nINPUT: \"Im Rahmen der Arbeit wurde eine Webanwendung erstellt.\"\nOUTPUT: {\"Firma\":null}\n\nOUTPUT: {\"Firma\":string|null}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1808,
+        -64
+      ],
+      "id": "038dcc37-cdde-401f-9b38-15842147d922",
+      "name": "AI Agent2",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=TEXT:\n{{$json.chunk_text}}\n\n/no_think",
+        "options": {
+          "systemMessage": "=Du bist ein JSON-Extraktor. Antworte NUR mit einem JSON-Objekt.\nKein Text, kein Markdown, keine Backticks.\nVerwende NUR Informationen aus dem TEXT. Wenn nichts gefunden → null.\n\nAUFGABE: Extrahiere zwei Informationen aus dem TEXT:\n1. Fehlende Kenntnisse: Was hat laut Text gefehlt oder wäre wünschenswert gewesen?\n2. Art des Jobs: Welche konkrete Tätigkeitsbezeichnung wird für die praktische Tätigkeit genannt?\n\nREGELN:\n- Nur extrahieren, was wörtlich im Text steht.\n- Keine Interpretation, keine Ableitung, kein externes Wissen.\n- Wenn nicht eindeutig vorhanden → null.\n\nBEISPIELE:\n\nINPUT: \"Mir fehlten Kenntnisse in Datenbanken und SQL, was die Einarbeitung erschwerte.\"\nOUTPUT: {\"Fehlende Kenntnisse und Lehrveranstaltungen\":[\"Datenbanken\",\"SQL\"],\"Art des Jobs\":null}\n\nINPUT: \"Im Bereich der Softwareentwicklung hätte ich mir mehr Vorwissen in Python gewünscht.\"\nOUTPUT: {\"Fehlende Kenntnisse und Lehrveranstaltungen\":[\"Python\"],\"Art des Jobs\":\"Softwareentwicklung\"}\n\nINPUT: \"Das Praktikum im Bereich IT-Support war sehr lehrreich.\"\nOUTPUT: {\"Fehlende Kenntnisse und Lehrveranstaltungen\":null,\"Art des Jobs\":\"IT-Support\"}\n\nINPUT: \"Die Arbeit hat mir viel Spaß gemacht und ich konnte viel lernen.\"\nOUTPUT: {\"Fehlende Kenntnisse und Lehrveranstaltungen\":null,\"Art des Jobs\":null}\n\nOUTPUT: {\"Fehlende Kenntnisse und Lehrveranstaltungen\":string[]|null,\"Art des Jobs\":string|null}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        1808,
+        544
+      ],
+      "id": "aaf2533f-fdbd-4fee-a0bf-2ba21b1129b3",
+      "name": "AI Agent3",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.72.96.73:2543/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer lm-studio"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "text-embedding-nomic-embed-text-v1.5"
+            },
+            {
+              "name": "input",
+              "value": "={{$json.embedding_text}}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2672,
+        -144
+      ],
+      "id": "f9a8d354-7732-40b7-9c2e-b24cb9bfbafd",
+      "name": "HTTP Request2",
+      "credentials": {
+        "openAiApi": {
+          "id": "pYXv3PyMtEzhPSgj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://sqxpilwpfcgqmabogatq.supabase.co/rest/v1/rpc/match_company",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "supabaseApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "query_embedding",
+              "value": "={{ $json.data[0].embedding }}"
+            },
+            {
+              "name": "match_count",
+              "value": "5"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2832,
+        -144
+      ],
+      "id": "52378df2-fd0a-48ab-82b5-76ba051390cf",
+      "name": "HTTP Request3",
+      "credentials": {
+        "supabaseApi": {
+          "id": "SstN4eyLeWb8YuEh",
+          "name": "WING_Module"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "6ecc6613-fd22-4098-b7c4-40e85817ee43",
+              "leftValue": "={{$json.Firma}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2272,
+        -64
+      ],
+      "id": "aee209b2-5e4d-4132-8779-22496c36d5c2",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "jsCode": "const company = $json.Firma;\n\nlet embedding_text = null;\n\nif (company && typeof company === \"string\") {\n  embedding_text = `Firma: ${company}`;\n}\n\nreturn [\n  {\n    json: {\n      ...$json,\n      embedding_text\n    }\n  }\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2512,
+        -144
+      ],
+      "id": "d6e3d048-2078-4ac5-a51a-470809e6deca",
+      "name": "Code in JavaScript11"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Input: items from Supabase RPC (each item.json has: id, content, score)\n// Output: ONE item with a single text field `companies_text` for the LLM\n\nconst items = $input.all();\n\nconst rows = items\n  .map(i => i.json)\n  .filter(r => r && r.id);\n\nconst seen = new Set();\nconst unique = [];\n\nfor (const r of rows) {\n  if (seen.has(r.id)) continue;\n  seen.add(r.id);\n  unique.push({\n    id: r.id,\n    score: typeof r.score === \"number\" ? r.score : null,\n    content: typeof r.content === \"string\" ? r.content : \"\",\n  });\n}\n\n// Build compact text block for LLM\nconst companies_text = unique\n  .map((c, idx) => {\n    const scoreStr = c.score === null ? \"n/a\" : c.score.toFixed(4);\n    const contentShort = c.content.replace(/\\s+/g, \" \").slice(0, 200);\n    return `#${idx + 1}\\nID: ${c.id}\\nScore: ${scoreStr}\\nContent: ${contentShort}`;\n  })\n  .join(\"\\n\\n---\\n\\n\");\n\nreturn [\n  {\n    json: {\n      companies_text,\n      companies_count: unique.length,\n    },\n  },\n];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2992,
+        -144
+      ],
+      "id": "8da6cda7-5000-4f90-bd22-77a226d9c5c3",
+      "name": "Code in JavaScript12"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Du bist ein JSON-Extraktor. Antworte NUR mit einem JSON-Objekt.\nKein Text, kein Markdown, keine Backticks.\n\nAUFGABE:\nVergleiche den extrahierten Firmennamen mit den KANDIDATEN.\nWähle die ID des Kandidaten, der am besten zum extrahierten Firmennamen passt.\n\nREGELN:\n- Gib NUR die ID des passenden Kandidaten zurück (z.B. \"mercedes-benz\"), keinen Firmennamen.\n- Gib MAXIMAL 1 ID zurück.\n- Entscheide anhand des Inhalts, nicht nur anhand des Scores.\n- Ein hoher Score allein reicht NICHT. Der Firmenname muss inhaltlich übereinstimmen.\n- Wenn ein Kandidat inhaltlich passt → gib dessen ID zurück.\n- Wenn KEIN Kandidat inhaltlich passt → gib den extrahierten Firmennamen unverändert zurück.\n- Wenn keine Firma extrahiert wurde (null) → null.\n\nBEISPIELE:\n\nFIRMA: \"Bosch\"\nKANDIDATEN: #1 ID: bosch Score: 0.95 Content: Firma: Bosch\nOUTPUT: {\"Firma\":\"bosch\"}\n\nFIRMA: \"Bosch\"\nKANDIDATEN: #1 ID: porsche Score: 0.4 Content: Firma: Porsche\nOUTPUT: {\"Firma\":\"Bosch\"}\n\nFIRMA: \"Erhardt OHG\"\nKANDIDATEN: #1 ID: mercedes-benz Score: 0.52 Content: Firma: Mercedes-Benz #2 ID: porsche Score: 0.48 Content: Firma: Porsche\nOUTPUT: {\"Firma\":\"Erhardt OHG\"}\n\nFIRMA: null\nOUTPUT: {\"Firma\":null}\n\n────────────────────────────────────\nFIRMA:\n{{ $('Code in JavaScript11').first().json.Firma }}\n────────────────────────────────────\nKANDIDATEN:\n{{ $json.companies_text }}\n────────────────────────────────────\nOUTPUT: {\"Firma\":string|null}",
+        "batching": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.7,
+      "position": [
+        3152,
+        -144
+      ],
+      "id": "7c73eead-6866-47a0-ae75-f723dde3e019",
+      "name": "Basic LLM Chain1"
+    },
+    {
+      "parameters": {
+        "jsCode": "let raw = $json.text ?? \"\";\nraw = raw.replace(/<think>[\\s\\S]*?<\\/think>/g, \"\")\n         .replace(/```json/g, \"\")\n         .replace(/```/g, \"\")\n         .trim();\nreturn [{ json: JSON.parse(raw) }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3440,
+        -144
+      ],
+      "id": "f43556e1-d330-4089-b0d2-e078503be5fe",
+      "name": "Code in JavaScript13"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "59df21f7-5e7d-4e05-800f-6eff5d64aa7c",
+              "leftValue": "={{$json.rag_query}}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2272,
+        240
+      ],
+      "id": "a0657b8f-7171-4341-98d2-391a99b9072d",
+      "name": "If1"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "for each chunk": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI Agent2",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "AI Agent3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Basic LLM Chain2",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "AI Agent3",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "AI Agent2",
+            "type": "ai_languageModel",
+            "index": 0
+          },
+          {
+            "node": "Basic LLM Chain1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When Executed by Another Workflow": {
+      "main": [
+        [
+          {
+            "node": "split chunks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "split chunks": {
+      "main": [
+        [
+          {
+            "node": "for each chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript4": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript8",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript5": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript6": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript7",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript7": {
+      "main": [
+        [
+          {
+            "node": "for each chunk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript8": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript9": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript10": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript6",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript9",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript10",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request2": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript11",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript11": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request3": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript12",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript12": {
+      "main": [
+        [
+          {
+            "node": "Basic LLM Chain1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Basic LLM Chain1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript13",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript13": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Code in JavaScript5",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "68ed6266-4e64-47dd-8d5d-0f7f9159b97e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "323260c911a0ce0b4c694c9e40daf282560229417db9670713cdb637193cafc5"
+  },
+  "id": "GvNuYWfpzpB6n8ZN",
+  "tags": []
+}

@@ -1,0 +1,176 @@
+{
+  "name": "CSVtoSupabase",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -480,
+        -192
+      ],
+      "id": "148f8a77-fe0e-40af-b09d-e9709096ba66",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "fileSelector": "/opt/scripts/companies_prepared_for_supabase.csv",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        -160,
+        -192
+      ],
+      "id": "2f8ae150-5c4e-48c2-8dd5-bcd615694be3",
+      "name": "Read/Write Files from Disk"
+    },
+    {
+      "parameters": {
+        "options": {
+          "delimiter": ","
+        }
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        32,
+        -192
+      ],
+      "id": "c294623a-8034-4ce0-a10f-e6a1bd0341d1",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://10.72.96.73:2543/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "text-embedding-nomic-embed-text-v1.5"
+            },
+            {
+              "name": "input",
+              "value": "={{ $json.embedding_text }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        480,
+        -192
+      ],
+      "id": "d3b2039f-fe69-4ff2-8017-0a4e019bd558",
+      "name": "HTTP Request",
+      "executeOnce": false,
+      "credentials": {
+        "openAiApi": {
+          "id": "pYXv3PyMtEzhPSgj",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "tableId": "companies",
+        "fieldsUi": {
+          "fieldValues": [
+            {
+              "fieldId": "id",
+              "fieldValue": "={{ $('Extract from File').item.json.id }}"
+            },
+            {
+              "fieldId": "content",
+              "fieldValue": "={{ $('Extract from File').item.json.embedding_text }}"
+            },
+            {
+              "fieldId": "embedding",
+              "fieldValue": "={{ $json.data[0].embedding }}"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.supabase",
+      "typeVersion": 1,
+      "position": [
+        672,
+        -192
+      ],
+      "id": "7667d41d-3a05-4747-a18e-59ea003a6c48",
+      "name": "Create a row",
+      "executeOnce": false,
+      "credentials": {
+        "supabaseApi": {
+          "id": "SstN4eyLeWb8YuEh",
+          "name": "WING_Module"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Read/Write Files from Disk",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read/Write Files from Disk": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Create a row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c41e20f6-d6ce-44ba-981a-07f00234063e",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "323260c911a0ce0b4c694c9e40daf282560229417db9670713cdb637193cafc5"
+  },
+  "id": "uULhNmf39dpKEoLE",
+  "tags": []
+}

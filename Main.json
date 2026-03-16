@@ -1,0 +1,479 @@
+{
+  "name": "Main",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -448,
+        -80
+      ],
+      "id": "577a795a-8a90-492e-b2ec-14a194009cf7",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "command": "ls /data/reports\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        192,
+        -80
+      ],
+      "id": "ccf06e4e-3a61-4a6e-8219-ef4507a7c13c",
+      "name": "Execute Command"
+    },
+    {
+      "parameters": {
+        "jsCode": "const lines = ($json.stdout || '')\n  .split('\\n')\n  .map(s => s.trim())\n  .filter(Boolean);\n\nconst pdfs = lines.filter(n => n.toLowerCase().endsWith('.pdf'));\n\nreturn pdfs.map(fileName => ({\n  json: {\n    fileName,\n    filePath: `/data/reports/${fileName}`,\n  }\n}));\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        336,
+        -80
+      ],
+      "id": "a9094db2-5ab3-4031-80c3-13268993eaf1",
+      "name": "split PDF list"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        512,
+        -80
+      ],
+      "id": "ece225c3-aead-4d2b-9147-e2523e2f0968",
+      "name": "for each PDF"
+    },
+    {
+      "parameters": {
+        "command": "=python3 /opt/scripts/pdfextract.py {{$json.filePath}}"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        672,
+        16
+      ],
+      "id": "b502f459-9cb4-4d55-ab1d-ca1b3bd644fe",
+      "name": "pdfminer"
+    },
+    {
+      "parameters": {
+        "jsCode": "const parsed = JSON.parse($json.stdout);\n\nreturn {\n  json: {\n    fileName: $node[\"for each PDF\"].json.fileName,\n    filePath: $node[\"for each PDF\"].json.filePath,\n    num_chunks: parsed.num_chunks ?? (parsed.chunks?.length ?? 0),\n    chunks: parsed.chunks ?? []\n  }\n};\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        16
+      ],
+      "id": "d87e4879-946d-455e-97ef-37108e6828af",
+      "name": "parse pdfminer"
+    },
+    {
+      "parameters": {
+        "jsCode": "const store = $getWorkflowStaticData('global');\n\nfor (const k of Object.keys(store)) {\n  delete store[k];\n}\n\nreturn [{ json: { reset: true } }];\n"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        -80
+      ],
+      "id": "6d24ba98-4b72-4387-be28-2ed477f2c3b1",
+      "name": "reset global static data"
+    },
+    {
+      "parameters": {
+        "command": "=python3 /opt/scripts/initWorkbook.py"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        -96,
+        -80
+      ],
+      "id": "c643d2d5-4b3d-4764-ad0a-64818f0849c8",
+      "name": "create xlsx"
+    },
+    {
+      "parameters": {
+        "jsCode": "const store = $getWorkflowStaticData('global');\nconst parsed = JSON.parse($json.stdout);\nstore.output_file = parsed.output_file;\nreturn [{ json: { output_file: store.output_file } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        48,
+        -80
+      ],
+      "id": "c80e5ca4-ea5a-4572-bf9f-02961ac017b8",
+      "name": "store xlsx path"
+    },
+    {
+      "parameters": {
+        "jsCode": "const store = $getWorkflowStaticData('global');\n\nconst payload = {\n  output_file: store.output_file,\n  sheet: \"Berichte\",\n  row: [\n    $('parse pdfminer').first().json.fileName ?? \"\",\n    $input.first().json.Firma ?? \"\",\n    $input.first().json['Art des Jobs'] ?? \"\",\n    $input.first().json['Mitgebrachte Kenntnisse und Lehrveranstaltungen'] ?? \"\",\n    $input.first().json['Fehlende Kenntnisse und Lehrveranstaltungen'] ?? \"\"\n  ]\n};\n\nconst payload_b64 = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');\n\nreturn [{\n  json: {\n    payload_b64\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1152,
+        16
+      ],
+      "id": "52d450bd-fc63-4ce0-8a9b-cfdc58ff3d4a",
+      "name": "create berichte row"
+    },
+    {
+      "parameters": {
+        "command": "=python3 /opt/scripts/appendRow.py {{$json.payload_b64}}"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1328,
+        16
+      ],
+      "id": "4957333e-8fbc-4ab7-920e-900c7a0a0e96",
+      "name": "append berichte row",
+      "notesInFlow": false
+    },
+    {
+      "parameters": {
+        "amount": 10
+      },
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        736,
+        -176
+      ],
+      "id": "79421f9f-c2ab-4c46-b8c4-6305e9880a32",
+      "name": "Wait",
+      "webhookId": "0aed5baa-ac09-438c-90a5-262618cef43a"
+    },
+    {
+      "parameters": {
+        "jsCode": "function normSpaces(s) {\n  return String(s ?? '').replace(/\\s+/g, ' ').trim();\n}\n\nfunction stripLegalForms(s) {\n  // konservativ: entfernt häufige Rechtsformen am Ende oder als eigenes Token\n  // (kannst du erweitern)\n  return s\n    .replace(/\\b(gmbh|mbh|ag|se|kg|ohg|gbr|eg|ug|kgaa|inc|ltd|llc|sarl|sa)\\b\\.?/gi, '')\n    .replace(/\\s+/g, ' ')\n    .trim();\n}\n\nfunction normalizeCompany(raw) {\n  let s = normSpaces(raw);\n  if (!s) return '';\n\n  // vereinheitlichen\n  s = s.toLowerCase();\n\n  // & -> und\n  s = s.replace(/&/g, ' und ');\n\n  // Klammerzusätze raus (z.B. \"(Berlin)\")\n  s = s.replace(/\\([^)]*\\)/g, ' ');\n\n  // Satzzeichen raus, Bindestriche als Space\n  s = s.replace(/[-–—_/\\\\.,:;|]+/g, ' ');\n\n  // Rechtsformen raus\n  s = stripLegalForms(s);\n\n  // erneut spaces\n  s = normSpaces(s);\n\n  return s;\n}\n\n// Optional: Alias Map (für Abkürzungen / bekannte Varianten)\nconst ALIAS = {\n  // Beispiele (falls du später willst, hier erweitern):\n  // 'vw': 'volkswagen',\n  // 'db': 'deutsche bahn',\n  // 'telekom': 'deutsche telekom',\n};\n\nfunction canonicalCompany(raw) {\n  const n = normalizeCompany(raw);\n  if (!n) return '';\n  return ALIAS[n] || n;\n}\n\nfunction splitSkills(cell) {\n  const raw = normSpaces(cell);\n  if (!raw) return [];\n  return raw\n    .split(/[;\\n,]+/g)\n    .map(s => normSpaces(s))\n    .filter(Boolean);\n}\n\nfunction normalizeSkill(raw) {\n  let s = normSpaces(raw);\n  if (!s) return '';\n  s = s.toLowerCase();\n\n  // typische Vereinheitlichungen\n  s = s.replace(/\\bms\\b/g, 'microsoft');\n  s = s.replace(/[-–—_/\\\\]+/g, ' ');\n  s = s.replace(/\\s+/g, ' ').trim();\n\n  return s;\n}\n\nfunction topNFromMap(map, n) {\n  return [...map.entries()]\n    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0], 'de'))\n    .slice(0, n)\n    .map(([name, count]) => ({ name, count }));\n}\n\nconst items = $input.all();\nif (items.length === 0) {\n  throw new Error('Keine Input-Items bekommen.');\n}\n\n// XLSX Path aus erstem Item (wird in jedem Item mitgeführt)\nconst xlsxPath = items[0].json.__xlsxPath;\n\n// Counts\nconst companyCounts = new Map();\nconst skillCounts = new Map();\n\n// Für Transparenz: Roh->Canonical Mapping mitzählen\nconst companyVariants = new Map(); // canonical -> Set(raw variants)\n\nfor (const it of items) {\n  const firmaRaw = it.json['Firma'];\n  const canonical = canonicalCompany(firmaRaw);\n\n  if (canonical) {\n    companyCounts.set(canonical, (companyCounts.get(canonical) || 0) + 1);\n\n    const set = companyVariants.get(canonical) || new Set();\n    set.add(normSpaces(firmaRaw));\n    companyVariants.set(canonical, set);\n  }\n\n  // Skills: pro Bericht deduplizieren (damit doppelte Nennungen in einer Zelle nicht aufblasen)\n  const skillsRaw = it.json['Mitgebrachte Kenntnisse und Lehrveranstaltungen'];\n  const skills = splitSkills(skillsRaw).map(normalizeSkill).filter(Boolean);\n  const uniq = new Set(skills);\n\n  for (const s of uniq) {\n    skillCounts.set(s, (skillCounts.get(s) || 0) + 1);\n  }\n}\n\nconst topCompanies = topNFromMap(companyCounts, 3);\nconst topSkills = topNFromMap(skillCounts, 3);\n\n// companyVariants in JSON-friendly Form\nconst companyVariantsObj = {};\nfor (const [canon, set] of companyVariants.entries()) {\n  companyVariantsObj[canon] = [...set].sort((a, b) => a.localeCompare(b, 'de'));\n}\n\nreturn [{\n  json: {\n    xlsxPath,\n    topCompanies,\n    topSkills,\n    companyVariants: companyVariantsObj,\n    totals: {\n      rows: items.length,\n      uniqueCompanies: companyCounts.size,\n      uniqueSkills: skillCounts.size,\n    }\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        -176
+      ],
+      "id": "b5bcb7c1-83d6-489f-b83b-c70b60f76151",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "command": "=python3 /opt/scripts/write_summary.py \"{{$json.xlsxPath}}\" '{{ JSON.stringify($json.topCompanies) }}' '{{ JSON.stringify($json.topSkills) }}'\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        1392,
+        -176
+      ],
+      "id": "e4e6505b-fc6d-4929-b822-fb45e30abc07",
+      "name": "Execute Command1"
+    },
+    {
+      "parameters": {
+        "command": "=python3 /opt/scripts/read_berichte.py \"{{$node['store xlsx path'].json['output_file']}}\"\n"
+      },
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [
+        880,
+        -176
+      ],
+      "id": "219b4f51-1b7a-4bbb-bb4f-a022c0392fa9",
+      "name": "Execute Command2"
+    },
+    {
+      "parameters": {
+        "jsCode": "const rows = JSON.parse($input.first().json.stdout);\n\nreturn rows.map(r => ({ json: r }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        -176
+      ],
+      "id": "b6d984f2-72e3-459a-b7a8-ce349c1c3edc",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "workflowId": {
+          "__rl": true,
+          "value": "GvNuYWfpzpB6n8ZN",
+          "mode": "list",
+          "cachedResultUrl": "/workflow/GvNuYWfpzpB6n8ZN",
+          "cachedResultName": "ChunkLoopRAG"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "num_chunks": 0
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "fileName",
+              "displayName": "fileName",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "filePath",
+              "displayName": "filePath",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "string"
+            },
+            {
+              "id": "num_chunks",
+              "displayName": "num_chunks",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "number"
+            },
+            {
+              "id": "chunks",
+              "displayName": "chunks",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "canBeUsedToMatch": true,
+              "type": "array"
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": true
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.3,
+      "position": [
+        976,
+        16
+      ],
+      "id": "334a5f70-7fa4-4a01-9082-0bbfeab2334f",
+      "name": "Call 'ChunkLoopRAG'",
+      "retryOnFail": true,
+      "onError": "continueRegularOutput"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "reset global static data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Command": {
+      "main": [
+        [
+          {
+            "node": "split PDF list",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "split PDF list": {
+      "main": [
+        [
+          {
+            "node": "for each PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "for each PDF": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "pdfminer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "pdfminer": {
+      "main": [
+        [
+          {
+            "node": "parse pdfminer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "parse pdfminer": {
+      "main": [
+        [
+          {
+            "node": "Call 'ChunkLoopRAG'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "reset global static data": {
+      "main": [
+        [
+          {
+            "node": "create xlsx",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create xlsx": {
+      "main": [
+        [
+          {
+            "node": "store xlsx path",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "store xlsx path": {
+      "main": [
+        [
+          {
+            "node": "Execute Command",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "create berichte row": {
+      "main": [
+        [
+          {
+            "node": "append berichte row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "append berichte row": {
+      "main": [
+        [
+          {
+            "node": "for each PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Execute Command2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Execute Command1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute Command2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'ChunkLoopRAG'": {
+      "main": [
+        [
+          {
+            "node": "create berichte row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "7222aa0d-463d-40a7-90d4-c91dc59c1ef3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "323260c911a0ce0b4c694c9e40daf282560229417db9670713cdb637193cafc5"
+  },
+  "id": "oT34oRwmhwX6mHTW",
+  "tags": []
+}
